@@ -18,12 +18,13 @@
 #define ENCODER_B_PIN 3
 #define ENCODER_BUTTON_PIN 7
 
-// #define SERVO_PIN 10
-// #define SERVO_CLOSED_MICROS 1800
-// #define SERVO_OPEN_MICROS 1800
+#define SERVO_PIN 10
+#define SERVO_CLOSED_MICROS 1800
+#define SERVO_OPEN_MICROS 1400
 
-void encoderPinAHandler(void);
-void encoderPinBHandler(void);
+void encoderPinAISR(void);
+void encoderPinBISR(void);
 void updateFlower(void);
 void setWheel(byte WheelPos, float brightness);
 const size_t serialPrintf(const char *szFormat, ...);
+void rotateHandler(uint8_t, uint8_t);

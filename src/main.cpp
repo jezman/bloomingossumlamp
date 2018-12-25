@@ -1,37 +1,31 @@
 #include "main.h"
 
-volatile byte aFlag = 0;      // let's us know when we're expecting a rising edge on pinA to signal that the encoder has arrived at a detent
-volatile byte bFlag = 0;      // let's us know when we're expecting a rising edge on pinB to signal that the encoder has arrived at a detent (opposite direction to when aFlag is set)
-volatile byte encoderPos = 0; //this variable stores our current value of encoder position. Change to int or uin16_t instead of byte if you want to record a larger range than 0-255
-volatile byte oldEncPos = 0;  //stores the last encoder position value so we can compare to the current reading and see if it has changed (so we know when to print to the serial monitor)
-volatile byte reading = 0;    //somewhere to store the direct values we read from our interrupt pins before checking to see if we have moved a whole detent
-
-int flowerGoalState = HIGH; // HIGH = Open, LOW = Closed
-int buttonState;            // the current reading from the input pin
-int lastButtonState = LOW;  // the previous reading from the input pin
-
-long lastDebounceTime = 0; // the last time the output pin was toggled
-long debounceDelay = 50;   // the debounce time; increase if the output flickers
-
-static int servoPin = 10; //variable to store which pin is the signal pin
-static int servoClosedMicros = 1800;
-static int servoOpenMicros = 1400;
-int pos = servoClosedMicros;
-
-//petal animation timing variables
-int frameDuration = 3000;         //number of milliseconds for complete movement
-int frameElapsed = 0;             //how much of the frame has gone by, will range from 0 to frameDuration
-unsigned long previousMillis = 0; //the last time we ran the position interpolation
-unsigned long currentMillis = 0;  //current time, we will update this continuosly
-int interval = 0;
-
-//petal animation status variables
-int movementDirection = 0; //0 = stopped, 1 opening, -1 closing
-
-volatile float brightness = 0.0;
-
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(PIXEL_NUM, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_TiCoServo petalServo;
+
+volatile uint8_t aFlag = 0;
+volatile uint8_t bFlag = 0;
+volatile uint8_t encoderPosition = 0;
+volatile uint8_t oldEncoderPosition = 0;
+volatile uint8_t reading = 0;
+
+uint8_t flowerGoalState = HIGH;
+uint8_t buttonState;
+uint8_t lastButtonState = LOW;
+
+uint_fast16_t servoPosition = SERVO_CLOSED_MICROS;
+
+int frameDuration = 3000;         //number of milliseconds for complete movement
+int frameElapsed = 0;             //how much of the frame has gone by, will range from 0 to frameDuration
+int interval = 0;
+unsigned long previousMillis = 0; //the last time we ran the servoPositionition interpolation
+unsigned long currentMillis = 0;  //current time, we will update this continuosly
+
+int8_t movementDirection = 0; //0 = stopped, 1 opening, -1 closing
+
+volatile float brightness = 0.0;
+long lastDebounceTime = 0;
+long debounceDelay = 50;
 
 void setup()
 {
@@ -39,53 +33,56 @@ void setup()
   pinMode(ENCODER_B_PIN, INPUT_PULLUP);
   pinMode(ENCODER_BUTTON_PIN, INPUT_PULLUP);
 
-  attachInterrupt(0, encoderPinAHandler, RISING);
-  attachInterrupt(1, encoderPinBHandler, RISING);
+  attachInterrupt(0, encoderPinAISR, RISING);
+  attachInterrupt(1, encoderPinBISR, RISING);
 
   strip.begin();
   strip.show();
 
-  petalServo.attach(servoPin);
+  petalServo.attach(SERVO_PIN);
 
 #if DEBUG
   Serial.begin(115200);
 #endif
 }
 
-void encoderPinAHandler()
+void loop()
 {
-  cli();                //stop interrupts happening before we read pin values
-
-  reading = PIND & 0xC; // read all eight pin values then strip away all but pinA and pinB's values
-
-  if (reading == B00001100 && aFlag)
-  {                  //check that we have both pins at detent (HIGH) and that we are expecting detent on this pin's rising edge
-    encoderPos -= 5; //decrement the encoder's position count
-    bFlag = 0;       //reset flags for the next turn
-    aFlag = 0;       //reset flags for the next turn
+  if (oldEncoderPosition != encoderPosition)
+  {
+    Serial.println(encoderPosition);
+    updateFlower();
+    oldEncoderPosition = encoderPosition;
   }
-  else if (reading == B00000100)
-    bFlag = 1; //signal that we're expecting pinB to signal the transition to detent from free rotation
 
-  sei();       //restart interrupts
-}
+  int reading = digitalRead(ENCODER_BUTTON_PIN);
 
-void encoderPinBHandler()
-{
-  cli();                //stop interrupts happening before we read pin values
+  if (reading != lastButtonState)
+    lastDebounceTime = millis();
 
-  reading = PIND & 0xC; //read all eight pin values then strip away all but pinA and pinB's values
+  if ((millis() - lastDebounceTime) > debounceDelay)
+  {
+    if (reading != buttonState)
+    {
+      buttonState = reading;
 
-  if (reading == B00001100 && bFlag)
-  {                  //check that we have both pins at detent (HIGH) and that we are expecting detent on this pin's rising edge
-    encoderPos += 5; //increment the encoder's position count
-    bFlag = 0;       //reset flags for the next turn
-    aFlag = 0;       //reset flags for the next turn
+      if (buttonState == HIGH)
+      {
+        if (movementDirection == 0)
+        {
+          flowerGoalState = !flowerGoalState;
+          movementDirection = (flowerGoalState == HIGH) ? 1 : -1;
+          petalServo.attach(SERVO_PIN);
+
+          PRINT("\nmovement direction:", movementDirection);
+        }
+        PRINTS("\nPush button pushed");
+      }
+    }
   }
-  else if (reading == B00001000)
-    aFlag = 1; //signal that we're expecting pinA to signal the transition to detent from free rotation
 
-  sei();       //restart interrupts
+  lastButtonState = reading;
+  updateFlower();
 }
 
 // Input a value 0 to 255 to get a color value.
@@ -97,9 +94,7 @@ uint32_t Wheel(byte WheelPos, float brightness)
   PRINT("\nratio:", brightness);
 
   if (WheelPos < 85)
-  {
     return strip.Color(brightness * (255 - WheelPos * 3), 0, brightness * (WheelPos * 3));
-  }
 
   if (WheelPos < 170)
   {
@@ -115,14 +110,10 @@ uint32_t Wheel(byte WheelPos, float brightness)
 void setWheel(byte WheelPos, float brightness)
 {
   for (uint16_t i = 0; i < strip.numPixels() / 2; i++)
-  {
     strip.setPixelColor(i, Wheel(WheelPos, brightness));
-  }
 
   for (uint16_t i = strip.numPixels() / 2; i < strip.numPixels(); i++)
-  {
     strip.setPixelColor(i, Wheel(128 - WheelPos, brightness));
-  }
 
   strip.show();
 }
@@ -156,54 +147,29 @@ void updateFlower()
 
   if (movementDirection != 0)
   {
-    int newServoMicros = (servoClosedMicros + int(frameElapsedRatio * (servoOpenMicros - servoClosedMicros)));
+    int newServoMicros = (SERVO_CLOSED_MICROS + int(frameElapsedRatio * (SERVO_OPEN_MICROS - SERVO_CLOSED_MICROS)));
     petalServo.write(newServoMicros);
   }
 
-  setWheel(encoderPos, brightness);
+  setWheel(encoderPosition, brightness);
 }
 
-void loop()
-{
-  if (oldEncPos != encoderPos)
-  {
-    Serial.println(encoderPos);
-    updateFlower();
-    oldEncPos = encoderPos;
+void rotateHandler(uint8_t bit, uint8_t flag) {
+  cli();
+
+  reading = PIND & 0xC;
+
+  if (reading == B00001100 && flag)
+  { 
+    (bit == 4) ? (encoderPosition -= 5) : (encoderPosition += 5);
+    bFlag = 0;
+    aFlag = 0;
   }
+  else if (reading == bit)
+    (bit == 4) ? (bFlag = 1): (aFlag = 1);
 
-  int reading = digitalRead(ENCODER_BUTTON_PIN);
-
-  if (reading != lastButtonState)
-    lastDebounceTime = millis();
-
-  if ((millis() - lastDebounceTime) > debounceDelay)
-  {
-    if (reading != buttonState)
-    {
-      buttonState = reading;
-
-      if (buttonState == HIGH)
-      {
-        if (movementDirection == 0)
-        {
-          flowerGoalState = !flowerGoalState;
-          if (flowerGoalState == HIGH)
-          {
-            movementDirection = 1;
-          }
-          else
-          {
-            movementDirection = -1;
-          }
-          PRINT("\nmovement direction:", movementDirection);
-          petalServo.attach(servoPin);
-        }
-        PRINTS("\nPush button pushed");
-      }
-    }
-  }
-
-  lastButtonState = reading;
-  updateFlower();
+  sei();
 }
+
+void encoderPinAISR() { rotateHandler(B00000100, aFlag); }
+void encoderPinBISR() { rotateHandler(B00001000, bFlag); }
