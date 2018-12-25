@@ -1,20 +1,4 @@
-/*
-* Code for the 3D printed Blooming Flower lamp by Jason "Ossum" Suter 
-* 3D files: https://www.myminifactory.com/object/37752
-* Website: www.ossum.co.za
-* Facebook Page: www.facebook.com/ossumdesigns
-* 
-*
-*Credit to Simon Merrett for his interrupt-based encoder code
-*https://www.instructables.com/id/Improved-Arduino-Rotary-Encoder-Reading/
-*
-*Credit to Adafruit for their TiCoServo and NeoPixel Arduino Libraries
-*/
-#include <Adafruit_TiCoServo.h>
-#include <Adafruit_NeoPixel.h>
-#ifdef __AVR__
-#include <avr/power.h>
-#endif
+#include "main.h"
 
 #define pinNeopixels 4  //DI of first strip connected to this pin
 #define numNeopixels 16 //we have two rings of 8
@@ -239,5 +223,3 @@ void loop(){
   updateFlower();
 
 }
-
-
